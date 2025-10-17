@@ -1,9 +1,10 @@
 #--------------------------------------------------------------------------------#
-#               HERRAMIENTA AVANZADA DE OPTIMIZACIÓN - PowerShell v4.0           #
-#            Versión con interfaz de usuario mejorada sin "Enter".             #
+#               HERRAMIENTA AVANZADA DE OPTIMIZACIÓN - PowerShell v3.0           #
+#      Script modular con menús para limpieza, reparación y optimización.      #
 #--------------------------------------------------------------------------------#
 
 # --- FUNCIÓN 0: VERIFICAR PERMISOS DE ADMINISTRADOR ---
+# Es crucial para que la mayoría de las funciones operen correctamente.
 function Check-Administrator {
     $currentUser = New-Object Security.Principal.WindowsPrincipal $([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -19,7 +20,6 @@ function Check-Administrator {
 
 #================================================================================#
 #                           BLOQUE DE FUNCIONES DE TAREAS                        #
-#          (Toda la lógica de limpieza, reparación, etc. no cambia)             #
 #================================================================================#
 
 # --- Limpieza: Carpetas del Sistema ---
@@ -49,7 +49,7 @@ function Clean-BrowserCache {
     foreach ($browser in $browserPaths.GetEnumerator()) {
         $path = $browser.Value
         if ($browser.Key -eq "Mozilla Firefox") {
-            try { $path = (Get-Item $path).FullName } catch { $path = $null }
+            try { $path = (Get-Item $path -ErrorAction Stop).FullName } catch { $path = $null }
         }
         if ($path -and (Test-Path $path)) {
             Write-Host "Limpiando $($browser.Key)..."
@@ -156,42 +156,48 @@ function Show-DiskSpace {
 function Show-MemoryInfo {
     Write-Host "`n--- Información de Memoria RAM ---" -ForegroundColor Cyan
     try {
-        $maxCapacityKB = (wmic memorychip get capacity | Measure-Object -Sum).Sum / 1024 / 1024
-        $slots = (wmic memphysical get memorydevices | Where-Object {$_ -match '\d'}).Count
-        Write-Host "Capacidad Máxima de RAM Soportada por la Placa Base: $maxCapacityKB GB"
+        $maxCapacityKB = (Get-CimInstance -ClassName 'win32_physicalmemoryarray').MaxCapacity
+        $maxCapacityGB = $maxCapacityKB / 1024 / 1024
+        $slots = (Get-CimInstance -ClassName 'win32_physicalmemoryarray').MemoryDevices
+        Write-Host "Capacidad Máxima de RAM Soportada: $maxCapacityGB GB"
         Write-Host "Ranuras de Memoria Físicas (Slots): $slots"
     } catch {
-        Write-Host "❌ No se pudo obtener la información de memoria vía WMIC." -ForegroundColor Red
+        Write-Host "❌ No se pudo obtener la información detallada de la memoria." -ForegroundColor Red
     }
 }
 
 
 #================================================================================#
-#                         FUNCIONES DEL MENÚ (MODIFICADAS)                       #
+#                 FUNCIONES DE MENÚS Y LÓGICA DE LA APLICACIÓN                   #
 #================================================================================#
 
-function Show-Menu { param([string]$Title, [scriptblock]$Content)
+# --- Función genérica para mostrar un menú y obtener la opción ---
+function Show-Menu {
+    param(
+        [string]$Title,
+        [scriptblock]$Content
+    )
     Clear-Host
     Write-Host "==================== $Title ====================" -ForegroundColor Green
-    & $Content
-    Write-Host "Selecciona una opción..." -ForegroundColor Yellow
-    # Captura una sola tecla, sin mostrarla en pantalla.
-    $key = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown").Character
-    return $key
+    & $Content # Ejecuta el bloque de script que contiene las opciones del menú
+    $choice = Read-Host "Opción"
+    return $choice.ToUpper()
 }
 
+# --- Función para pausar la ejecución ---
 function Pause-And-Continue {
-    Write-Host "`nPresiona cualquier tecla para continuar..." -ForegroundColor Gray
-    $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown") | Out-Null
+    Read-Host "Presiona Enter para continuar..."
 }
 
 
 #================================================================================#
-#                             INICIO DEL SCRIPT                                  #
+#                           EJECUCIÓN PRINCIPAL DEL SCRIPT                       #
 #================================================================================#
 
+# 1. Comprobar si se ejecuta como Administrador. Si no, el script termina.
 Check-Administrator
 
+# 2. Iniciar el bucle principal del programa.
 do {
     $mainChoice = Show-Menu -Title "MENÚ PRINCIPAL" -Content {
         Write-Host "[1] Menú de Limpieza"
@@ -222,7 +228,7 @@ do {
                     '3' { Clean-BrowserCache }
                     '4' { Clean-WindowsUpdateCache }
                     '5' { Empty-RecycleBin }
-                    'a' {
+                    'A' {
                         Clean-SystemFolders -FoldersToClean @("%temp%", "C:\Windows\Temp") -TaskName "Temporales"
                         Clean-SystemFolders -FoldersToClean @("C:\Windows\Prefetch") -TaskName "Prefetch"
                         Clean-BrowserCache
@@ -230,8 +236,8 @@ do {
                         Empty-RecycleBin
                     }
                 }
-                if ($choice -ne 'b') { Pause-And-Continue }
-            } while ($choice -ne 'b')
+                if ($choice -ne 'B') { Pause-And-Continue }
+            } while ($choice -ne 'B')
         }
         '2' { # Menú de Reparación
             do {
@@ -241,8 +247,8 @@ do {
                     Write-Host "[B] Volver" -ForegroundColor Red
                 }
                 switch ($choice) { '1' { Run-SFC } '2' { Run-DISM } }
-                if ($choice -ne 'b') { Pause-And-Continue }
-            } while ($choice -ne 'b')
+                if ($choice -ne 'B') { Pause-And-Continue }
+            } while ($choice -ne 'B')
         }
         '3' { # Menú de Optimización
             do {
@@ -252,8 +258,8 @@ do {
                     Write-Host "[B] Volver" -ForegroundColor Red
                 }
                 switch ($choice) { '1' { Set-HighPerformancePowerPlan } '2' { Optimize-Drives } }
-                if ($choice -ne 'b') { Pause-And-Continue }
-            } while ($choice -ne 'b')
+                if ($choice -ne 'B') { Pause-And-Continue }
+            } while ($choice -ne 'B')
         }
         '4' { # Menú de Utilidades
              do {
@@ -263,8 +269,8 @@ do {
                     Write-Host "[B] Volver" -ForegroundColor Red
                 }
                 switch ($choice) { '1' { Create-SystemRestorePoint } '2' { Reregister-StoreApps } }
-                if ($choice -ne 'b') { Pause-And-Continue }
-            } while ($choice -ne 'b')
+                if ($choice -ne 'B') { Pause-And-Continue }
+            } while ($choice -ne 'B')
         }
         '5' { # Menú de Información
              do {
@@ -279,10 +285,10 @@ do {
                     '1' { Show-SystemInfo }
                     '2' { Show-DiskSpace }
                     '3' { Show-MemoryInfo }
-                    'a' { Show-SystemInfo; Show-DiskSpace; Show-MemoryInfo }
+                    'A' { Show-SystemInfo; Show-DiskSpace; Show-MemoryInfo }
                 }
-                if ($choice -ne 'b') { Pause-And-Continue }
-            } while ($choice -ne 'b')
+                if ($choice -ne 'B') { Pause-And-Continue }
+            } while ($choice -ne 'B')
         }
         '6' { # Menú de Red
             do {
@@ -292,13 +298,15 @@ do {
                     Write-Host "[B] Volver" -ForegroundColor Red
                 }
                 switch ($choice) { '1' { Flush-DNS } '2' { Reset-Winsock } }
-                if ($choice -ne 'b') { Pause-And-Continue }
-            } while ($choice -ne 'b')
+                if ($choice -ne 'B') { Pause-And-Continue }
+            } while ($choice -ne 'B')
         }
-        'q' { Write-Host "Saliendo del programa..." }
+        'Q' { Write-Host "Saliendo del programa..." }
         default {
-            # No se necesita un mensaje de "opción inválida" porque
-            # simplemente no hace nada y vuelve a mostrar el menú.
+            if ($mainChoice) { # Evita mostrar error si el usuario solo presiona Enter
+                Write-Host "`n❌ Opción no válida." -ForegroundColor Red
+                Pause-And-Continue
+            }
         }
     }
-} while ($mainChoice -ne 'q')
+} while ($mainChoice -ne 'Q')
