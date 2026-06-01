@@ -1,236 +1,259 @@
 #--------------------------------------------------------------------------------#
-#               HERRAMIENTA AVANZADA DE OPTIMIZACIÓN - PowerShell v3.0           #
-#      Script modular con menús para limpieza, reparación y optimización.      #
+#               HERRAMIENTA AVANZADA DE OPTIMIZACIÓN - PowerShell v4.0           #
+#     Script modular con telemetría, UI mejorada, logs y cálculo de espacio.     #
 #--------------------------------------------------------------------------------#
 
+$LogPath = "$PSScriptRoot\optimizador_log.txt"
+
+# --- FUNCIÓN DE REGISTRO (LOGS) ---
+function Write-Log {
+    param([string]$Message)
+    $time = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    "$time - $Message" | Out-File -FilePath $LogPath -Append -ErrorAction SilentlyContinue
+}
+
+# --- FUNCIÓN DE INTERFAZ: DIBUJAR ENCABEZADOS ---
+function Draw-Header {
+    param([string]$Title)
+    Clear-Host
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host "  $Title" -ForegroundColor White -BackgroundColor DarkCyan
+    Write-Host "============================================================" -ForegroundColor Cyan
+    Write-Host ""
+}
+
 # --- FUNCIÓN 0: VERIFICAR PERMISOS DE ADMINISTRADOR ---
-# Es crucial para que la mayoría de las funciones operen correctamente.
 function Check-Administrator {
     $currentUser = New-Object Security.Principal.WindowsPrincipal $([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $currentUser.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        Write-Host "------------------------------------------------------------" -ForegroundColor Red
-        Write-Host "ERROR: PERMISOS INSUFICIENTES." -ForegroundColor Yellow
+        Draw-Header "ERROR DE PRIVILEGIOS"
+        Write-Host "⚠️ PERMISOS INSUFICIENTES." -ForegroundColor Red
         Write-Host "Este script requiere ser ejecutado como Administrador." -ForegroundColor Yellow
-        Write-Host "Haz clic derecho en el archivo -> 'Ejecutar como Administrador'." -ForegroundColor Yellow
-        Write-Host "------------------------------------------------------------" -ForegroundColor Red
-        Read-Host "Presiona Enter para salir..."
+        Write-Host "Haz clic derecho en el archivo -> 'Ejecutar con PowerShell' -> 'Ejecutar como Administrador'." -ForegroundColor Yellow
+        Read-Host "`nPresiona Enter para salir..."
         exit
     }
+    Write-Log "Inicio de sesión de optimización (Administrador verificado)."
 }
 
 #================================================================================#
-#                           BLOQUE DE FUNCIONES DE TAREAS                        #
+#                            BLOQUE DE TAREAS DE LIMPIEZA                        #
 #================================================================================#
 
-# --- Limpieza: Carpetas del Sistema ---
 function Clean-SystemFolders {
     param([string[]]$FoldersToClean, [string]$TaskName)
-    Write-Host "`n--- Ejecutando: $TaskName ---" -ForegroundColor Cyan
+    Write-Host "--- Ejecutando: $TaskName ---" -ForegroundColor Cyan
+    $totalFreed = 0
+
     foreach ($folder in $FoldersToClean) {
         $expandedPath = [System.Environment]::ExpandEnvironmentVariables($folder)
         if (Test-Path $expandedPath) {
-            Write-Host "Limpiando: $expandedPath"
+            Write-Host "Analizando: $expandedPath"
+            
+            # Calcular espacio antes de borrar
+            $sizeBefore = (Get-ChildItem -Path $expandedPath -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
+            
             Remove-Item -Path "$expandedPath\*" -Recurse -Force -ErrorAction SilentlyContinue
-            Write-Host "✔️ Limpieza completada." -ForegroundColor Green
-        } else {
-            Write-Host "⚠️ No se encontró: $expandedPath" -ForegroundColor Yellow
+            
+            if ($sizeBefore -gt 0) { $totalFreed += $sizeBefore }
         }
     }
+    
+    $mbFreed = [math]::Round($totalFreed / 1MB, 2)
+    Write-Host "✔️ Tarea completada. Espacio liberado: $mbFreed MB" -ForegroundColor Green
+    Write-Log "$TaskName completado. Liberados $mbFreed MB."
 }
 
-# --- Limpieza: Caché de Navegadores ---
 function Clean-BrowserCache {
-    Write-Host "`n--- Limpiando Caché de Navegadores... ---" -ForegroundColor Cyan
+    Write-Host "--- Limpiando Caché de Navegadores (Multi-perfil)... ---" -ForegroundColor Cyan
     $browserPaths = @{
-        "Google Chrome" = "$env:LOCALAPPDATA\Google\Chrome\User Data\Default\Cache"
-        "Microsoft Edge" = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Cache"
-        "Mozilla Firefox" = "$env:LOCALAPPDATA\Mozilla\Firefox\Profiles\*.default-release\cache2"
+        "Google Chrome" = "$env:LOCALAPPDATA\Google\Chrome\User Data\*\Cache"
+        "Microsoft Edge" = "$env:LOCALAPPDATA\Microsoft\Edge\User Data\*\Cache"
+        "Brave" = "$env:LOCALAPPDATA\BraveSoftware\Brave-Browser\User Data\*\Cache"
     }
+    
     foreach ($browser in $browserPaths.GetEnumerator()) {
-        $path = $browser.Value
-        if ($browser.Key -eq "Mozilla Firefox") {
-            try { $path = (Get-Item $path -ErrorAction Stop).FullName } catch { $path = $null }
-        }
-        if ($path -and (Test-Path $path)) {
-            Write-Host "Limpiando $($browser.Key)..."
-            Remove-Item -Path "$path\*" -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "Buscando perfiles de $($browser.Key)..." -ForegroundColor Gray
+        $paths = Get-Item -Path $browser.Value -ErrorAction SilentlyContinue
+        
+        if ($paths) {
+            foreach ($p in $paths) {
+                Remove-Item -Path "$($p.FullName)\*" -Recurse -Force -ErrorAction SilentlyContinue
+            }
             Write-Host "✔️ Caché de $($browser.Key) limpiada." -ForegroundColor Green
+            Write-Log "Caché de $($browser.Key) limpiada."
         } else {
-            Write-Host "ℹ️ $($browser.Key) no parece estar instalado." -ForegroundColor Gray
+            Write-Host "ℹ️ $($browser.Key) no encontrado o ya está limpio." -ForegroundColor DarkGray
         }
     }
 }
 
-# --- Limpieza: Caché de Windows Update ---
 function Clean-WindowsUpdateCache {
-    Write-Host "`n--- Limpiando Caché de Windows Update... ---" -ForegroundColor Cyan
-    Write-Host "Deteniendo servicios..." -ForegroundColor Yellow
-    Stop-Service -Name wuauserv -Force -ErrorAction SilentlyContinue
-    Stop-Service -Name bits -Force -ErrorAction SilentlyContinue
-    $path = "$env:windir\SoftwareDistribution"
-    if (Test-Path $path) {
-        Write-Host "Eliminando archivos de $path..."
-        Remove-Item -Path $path -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Host "✔️ Caché eliminada." -ForegroundColor Green
+    Write-Host "--- Limpiando Caché Profunda de Windows Update... ---" -ForegroundColor Cyan
+    Write-Progress -Activity "Mantenimiento de Windows" -Status "Deteniendo servicios de actualización..." -PercentComplete 20
+    
+    $services = @("wuauserv", "bits", "cryptsvc", "msiserver")
+    foreach ($srv in $services) { Stop-Service -Name $srv -Force -ErrorAction SilentlyContinue }
+    
+    $paths = @("$env:windir\SoftwareDistribution\Download", "$env:windir\System32\catroot2")
+    foreach ($path in $paths) {
+        if (Test-Path $path) {
+            Write-Host "Limpiando $path..."
+            Remove-Item -Path "$path\*" -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
-    Write-Host "Reiniciando servicios..." -ForegroundColor Yellow
-    Start-Service -Name wuauserv
-    Start-Service -Name bits
+    
+    Write-Progress -Activity "Mantenimiento de Windows" -Status "Reiniciando servicios..." -PercentComplete 80
+    foreach ($srv in $services) { Start-Service -Name $srv -ErrorAction SilentlyContinue }
+    
+    Write-Progress -Activity "Mantenimiento de Windows" -Status "Completado" -PercentComplete 100
+    Write-Host "✔️ Caché de Windows Update eliminada correctamente." -ForegroundColor Green
+    Write-Log "Caché de Windows Update limpiada."
 }
 
-# --- Limpieza: Papelera de Reciclaje ---
 function Empty-RecycleBin {
-    Write-Host "`n--- Vaciando Papelera de Reciclaje... ---" -ForegroundColor Cyan
+    Write-Host "--- Vaciando Papelera de Reciclaje... ---" -ForegroundColor Cyan
     try {
         Clear-RecycleBin -Force -ErrorAction Stop
         Write-Host "✔️ Papelera vaciada." -ForegroundColor Green
+        Write-Log "Papelera de reciclaje vaciada."
     } catch {
-        Write-Host "❌ No se pudo vaciar la Papelera." -ForegroundColor Red
+        Write-Host "❌ No se pudo vaciar la Papelera o ya está vacía." -ForegroundColor Yellow
     }
 }
 
-# --- Reparación: SFC y DISM ---
+#================================================================================#
+#                 NUEVAS FUNCIONES: PRIVACIDAD Y RENDIMIENTO                     #
+#================================================================================#
+
+function Disable-Telemetry {
+    Write-Host "--- Desactivando Telemetría de Windows... ---" -ForegroundColor Cyan
+    try {
+        Stop-Service -Name "DiagTrack" -Force -ErrorAction SilentlyContinue
+        Set-Service -Name "DiagTrack" -StartupType Disabled -ErrorAction SilentlyContinue
+        Stop-Service -Name "dmwappushservice" -Force -ErrorAction SilentlyContinue
+        Set-Service -Name "dmwappushservice" -StartupType Disabled -ErrorAction SilentlyContinue
+        Write-Host "✔️ Servicios de rastreo y telemetría desactivados." -ForegroundColor Green
+        Write-Log "Telemetría (DiagTrack y dmwappushservice) desactivada."
+    } catch {
+        Write-Host "⚠️ Error al modificar servicios de telemetría." -ForegroundColor Red
+    }
+}
+
+function Optimize-GamingMode {
+    Write-Host "--- Optimizando Red y Sistema para Juegos (Baja Latencia)... ---" -ForegroundColor Cyan
+    try {
+        # Desactivar limitación de red
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -Name "NetworkThrottlingIndex" -Value 4294967295 -ErrorAction SilentlyContinue
+        # Priorizar respuesta del sistema
+        Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Multimedia\SystemProfile" -Name "SystemResponsiveness" -Value 0 -ErrorAction SilentlyContinue
+        Write-Host "✔️ Parámetros del registro ajustados para baja latencia." -ForegroundColor Green
+        Write-Log "Modo Juego activado (NetworkThrottlingIndex y SystemResponsiveness)."
+    } catch {
+        Write-Host "❌ Error al modificar el registro." -ForegroundColor Red
+    }
+}
+
+function Remove-Bloatware {
+    Write-Host "--- Eliminando Bloatware Seguro (Apps Preinstaladas)... ---" -ForegroundColor Cyan
+    $apps = @("*bing*", "*zune*", "*solitaire*")
+    foreach ($app in $apps) {
+        Write-Host "Eliminando $app..." -ForegroundColor Gray
+        Get-AppxPackage -Name $app -AllUsers | Remove-AppxPackage -ErrorAction SilentlyContinue
+    }
+    Write-Host "✔️ Bloatware básico eliminado." -ForegroundColor Green
+    Write-Log "Bloatware eliminado: $apps"
+}
+
+#================================================================================#
+#                       REPARACIÓN Y UTILIDADES ESTÁNDAR                         #
+#================================================================================#
+
 function Run-SFC {
-    Write-Host "`n--- Ejecutando Comprobador de Archivos (SFC)... ---" -ForegroundColor Cyan
-    Write-Host "Esto puede tardar varios minutos..." -ForegroundColor Yellow
+    Write-Host "--- Ejecutando Comprobador de Archivos (SFC)... ---" -ForegroundColor Cyan
+    Write-Host "⏳ Esto puede tardar varios minutos..." -ForegroundColor Yellow
     sfc.exe /scannow
-    Write-Host "✔️ Proceso SFC finalizado." -ForegroundColor Green
+    Write-Log "Ejecutado sfc /scannow."
 }
+
 function Run-DISM {
-    Write-Host "`n--- Ejecutando Reparación de Imagen (DISM)... ---" -ForegroundColor Cyan
-    Write-Host "Esto puede tardar bastante tiempo y requiere internet..." -ForegroundColor Yellow
+    Write-Host "--- Ejecutando Reparación de Imagen (DISM)... ---" -ForegroundColor Cyan
+    Write-Host "⏳ Requiere internet y paciencia..." -ForegroundColor Yellow
     Dism.exe /Online /Cleanup-Image /RestoreHealth
-    Write-Host "✔️ Proceso DISM finalizado." -ForegroundColor Green
+    Write-Log "Ejecutado DISM RestoreHealth."
 }
 
-# --- Red: DNS y Winsock ---
-function Flush-DNS {
-    Write-Host "`n--- Limpiando Caché DNS... ---" -ForegroundColor Cyan
-    ipconfig.exe /flushdns
-    Write-Host "✔️ Caché DNS limpiada." -ForegroundColor Green
-}
-function Reset-Winsock {
-    Write-Host "`n--- Reiniciando Catálogo Winsock... ---" -ForegroundColor Cyan
-    netsh.exe winsock reset
-    Write-Host "✔️ Winsock reiniciado. Se recomienda reiniciar el equipo." -ForegroundColor Green
-}
-
-# --- Optimización: Plan de Energía y Unidades ---
 function Set-HighPerformancePowerPlan {
-    $highPerformanceGuid = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
-    Write-Host "`n--- Activando plan de energía 'Alto Rendimiento'... ---" -ForegroundColor Cyan
-    powercfg /setactive $highPerformanceGuid
-    Write-Host "✔️ Plan de energía establecido." -ForegroundColor Green
-}
-function Optimize-Drives {
-    Write-Host "`n--- Optimizando todas las unidades (HDD/SSD)... ---" -ForegroundColor Cyan
-    Write-Host "Este proceso puede tardar." -ForegroundColor Yellow
-    Optimize-Volume -DriveLetter (Get-Volume).DriveLetter -Verbose
-    Write-Host "✔️ Optimización completada." -ForegroundColor Green
+    $guid = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c"
+    powercfg /setactive $guid
+    Write-Host "✔️ Plan de energía 'Alto Rendimiento' establecido." -ForegroundColor Green
+    Write-Log "Plan de energía cambiado a Alto Rendimiento."
 }
 
-# --- Utilidades: Punto de Restauración y Apps ---
 function Create-SystemRestorePoint {
-    Write-Host "`n--- Creando Punto de Restauración... ---" -ForegroundColor Cyan
-    Checkpoint-Computer -Description "Punto creado por Herramienta de Optimización" -RestorePointType "MODIFY_SETTINGS"
-    Write-Host "✔️ Punto de Restauración creado." -ForegroundColor Green
-}
-function Reregister-StoreApps {
-    Write-Host "`n--- Re-registrando Apps de la Tienda de Windows... ---" -ForegroundColor Cyan
-    Write-Host "Este proceso puede tardar y mostrará muchos mensajes..." -ForegroundColor Yellow
-    Get-AppXPackage -AllUsers | Foreach {Add-AppxPackage -DisableDevelopmentMode -Register "$($_.InstallLocation)\AppXManifest.xml" -Verbose}
-    Write-Host "✔️ Tarea completada." -ForegroundColor Green
+    Write-Host "--- Creando Punto de Restauración... ---" -ForegroundColor Cyan
+    try {
+        Enable-ComputerRestore -Drive "C:\" -ErrorAction SilentlyContinue
+        Checkpoint-Computer -Description "Optimizador Jaccstudios" -RestorePointType "MODIFY_SETTINGS" -ErrorAction Stop
+        Write-Host "✔️ Punto de Restauración creado con éxito." -ForegroundColor Green
+        Write-Log "Punto de restauración creado."
+    } catch {
+        Write-Host "❌ Error: Es posible que la restauración del sistema esté desactivada o se haya creado uno recientemente." -ForegroundColor Red
+    }
 }
 
-# --- Información: Sistema, Disco y Memoria ---
 function Show-SystemInfo {
-    Write-Host "`n--- Información del Sistema ---" -ForegroundColor Cyan
-    Get-ComputerInfo | Select-Object OsName, CsProcessors, OsHardwareAbstractionLayer | Format-List
-    $mem = (Get-CimInstance Win32_PhysicalMemory | Measure-Object -Property capacity -Sum).sum / 1GB
-    Write-Host "Memoria Física Total Instalada: $($mem.ToString('F2')) GB"
-}
-function Show-DiskSpace {
-    Write-Host "`n--- Uso de Espacio en Disco ---" -ForegroundColor Cyan
+    Write-Host "--- Información General ---" -ForegroundColor Cyan
+    Get-ComputerInfo | Select-Object OsName, CsProcessors | Format-List
+    Write-Host "--- Uso de Espacio en Disco ---" -ForegroundColor Cyan
     Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{Name="Usado (GB)"; Expression={[math]::Round($_.Used / 1GB, 2)}}, @{Name="Libre (GB)"; Expression={[math]::Round($_.Free / 1GB, 2)}} -AutoSize
 }
-function Show-MemoryInfo {
-    Write-Host "`n--- Información de Memoria RAM ---" -ForegroundColor Cyan
-    try {
-        $maxCapacityKB = (Get-CimInstance -ClassName 'win32_physicalmemoryarray').MaxCapacity
-        $maxCapacityGB = $maxCapacityKB / 1024 / 1024
-        $slots = (Get-CimInstance -ClassName 'win32_physicalmemoryarray').MemoryDevices
-        Write-Host "Capacidad Máxima de RAM Soportada: $maxCapacityGB GB"
-        Write-Host "Ranuras de Memoria Físicas (Slots): $slots"
-    } catch {
-        Write-Host "❌ No se pudo obtener la información detallada de la memoria." -ForegroundColor Red
-    }
-}
-
 
 #================================================================================#
-#                 FUNCIONES DE MENÚS Y LÓGICA DE LA APLICACIÓN                   #
+#                                SISTEMA DE MENÚS                                #
 #================================================================================#
 
-# --- Función genérica para mostrar un menú y obtener la opción ---
-function Show-Menu {
-    param(
-        [string]$Title,
-        [scriptblock]$Content
-    )
-    Clear-Host
-    Write-Host "==================== $Title ====================" -ForegroundColor Green
-    & $Content # Ejecuta el bloque de script que contiene las opciones del menú
-    $choice = Read-Host "Opción"
-    return $choice.ToUpper()
-}
-
-# --- Función para pausar la ejecución ---
 function Pause-And-Continue {
+    Write-Host "`n"
     Read-Host "Presiona Enter para continuar..."
 }
 
-
-#================================================================================#
-#                           EJECUCIÓN PRINCIPAL DEL SCRIPT                       #
-#================================================================================#
-
-# 1. Comprobar si se ejecuta como Administrador. Si no, el script termina.
 Check-Administrator
 
-# 2. Iniciar el bucle principal del programa.
 do {
-    $mainChoice = Show-Menu -Title "MENÚ PRINCIPAL" -Content {
-        Write-Host "[1] Menú de Limpieza"
-        Write-Host "[2] Menú de Reparación del Sistema"
-        Write-Host "[3] Menú de Optimización y Rendimiento"
-        Write-Host "[4] Menú de Utilidades y Seguridad"
-        Write-Host "[5] Menú de Información del Sistema"
-        Write-Host "[6] Menú de Utilidades de Red"
-        Write-Host "------------------------------------------------------------"
-        Write-Host "[Q] Salir del programa" -ForegroundColor Red
-    }
+    Draw-Header "MENÚ PRINCIPAL - OPTIMIZADOR"
+    Write-Host "[1] Limpieza de Basura y Caché"
+    Write-Host "[2] Reparación del Sistema (SFC/DISM)"
+    Write-Host "[3] Rendimiento y Privacidad (NUEVO)"
+    Write-Host "[4] Utilidades y Seguridad"
+    Write-Host "[5] Información del Sistema"
+    Write-Host "------------------------------------------------------------" -ForegroundColor DarkCyan
+    Write-Host "[Q] Salir" -ForegroundColor Red
+    Write-Host ""
+    
+    $mainChoice = Read-Host "Selecciona una opción"
+    $mainChoice = $mainChoice.ToUpper()
 
     switch ($mainChoice) {
-        '1' { # Menú de Limpieza
+        '1' { 
             do {
-                $choice = Show-Menu -Title "MENÚ DE LIMPIEZA" -Content {
-                    Write-Host "[1] Limpiar Archivos Temporales (Temp, %Temp%)"
-                    Write-Host "[2] Limpiar Carpeta Prefetch"
-                    Write-Host "[3] Limpiar Caché de Navegadores"
-                    Write-Host "[4] Limpiar Caché de Windows Update"
-                    Write-Host "[5] Vaciar Papelera de Reciclaje"
-                    Write-Host "[A] EJECUTAR TODAS LAS TAREAS DE LIMPIEZA" -ForegroundColor Cyan
-                    Write-Host "[B] Volver al Menú Principal" -ForegroundColor Red
-                }
+                Draw-Header "MENÚ DE LIMPIEZA"
+                Write-Host "[1] Limpiar Temporales del Sistema"
+                Write-Host "[2] Limpiar Caché de Todos los Navegadores"
+                Write-Host "[3] Limpieza Profunda de Windows Update"
+                Write-Host "[4] Vaciar Papelera de Reciclaje"
+                Write-Host "[A] EJECUTAR TODA LA LIMPIEZA" -ForegroundColor Cyan
+                Write-Host "[B] Volver al Menú Principal" -ForegroundColor Red
+                
+                $choice = (Read-Host "`nOpción").ToUpper()
+                Write-Host ""
                 switch ($choice) {
-                    '1' { Clean-SystemFolders -FoldersToClean @("%temp%", "C:\Windows\Temp") -TaskName "Temporales" }
-                    '2' { Clean-SystemFolders -FoldersToClean @("C:\Windows\Prefetch") -TaskName "Prefetch" }
-                    '3' { Clean-BrowserCache }
-                    '4' { Clean-WindowsUpdateCache }
-                    '5' { Empty-RecycleBin }
+                    '1' { Clean-SystemFolders -FoldersToClean @("%temp%", "C:\Windows\Temp", "C:\Windows\Prefetch") -TaskName "Archivos Temporales y Prefetch" }
+                    '2' { Clean-BrowserCache }
+                    '3' { Clean-WindowsUpdateCache }
+                    '4' { Empty-RecycleBin }
                     'A' {
-                        Clean-SystemFolders -FoldersToClean @("%temp%", "C:\Windows\Temp") -TaskName "Temporales"
-                        Clean-SystemFolders -FoldersToClean @("C:\Windows\Prefetch") -TaskName "Prefetch"
+                        Clean-SystemFolders -FoldersToClean @("%temp%", "C:\Windows\Temp", "C:\Windows\Prefetch") -TaskName "Temporales y Prefetch"
                         Clean-BrowserCache
                         Clean-WindowsUpdateCache
                         Empty-RecycleBin
@@ -239,74 +262,67 @@ do {
                 if ($choice -ne 'B') { Pause-And-Continue }
             } while ($choice -ne 'B')
         }
-        '2' { # Menú de Reparación
+        '2' { 
             do {
-                $choice = Show-Menu -Title "REPARACIÓN DEL SISTEMA" -Content {
-                    Write-Host "[1] Ejecutar SFC (Comprobador de Archivos)"
-                    Write-Host "[2] Ejecutar DISM (Reparar Imagen de Windows)"
-                    Write-Host "[B] Volver" -ForegroundColor Red
-                }
-                switch ($choice) { '1' { Run-SFC } '2' { Run-DISM } }
+                Draw-Header "REPARACIÓN DEL SISTEMA"
+                Write-Host "[1] Ejecutar SFC (Reparar Archivos Corruptos)"
+                Write-Host "[2] Ejecutar DISM (Reparar Imagen Base)"
+                Write-Host "[B] Volver" -ForegroundColor Red
+                
+                $choice = (Read-Host "`nOpción").ToUpper()
+                Write-Host ""
+                switch ($choice) { '1' { Run-SFC }; '2' { Run-DISM } }
                 if ($choice -ne 'B') { Pause-And-Continue }
             } while ($choice -ne 'B')
         }
-        '3' { # Menú de Optimización
+        '3' { 
             do {
-                $choice = Show-Menu -Title "OPTIMIZACIÓN Y RENDIMIENTO" -Content {
-                    Write-Host "[1] Activar Plan de Energía 'Alto Rendimiento'"
-                    Write-Host "[2] Optimizar Unidades (HDD/SSD)"
-                    Write-Host "[B] Volver" -ForegroundColor Red
+                Draw-Header "RENDIMIENTO Y PRIVACIDAD"
+                Write-Host "[1] Activar Plan de Energía 'Alto Rendimiento'"
+                Write-Host "[2] Desactivar Telemetría y Rastreo de Windows"
+                Write-Host "[3] Modo Juego: Optimizar Latencia de Red"
+                Write-Host "[4] Eliminar Bloatware Básico"
+                Write-Host "[B] Volver" -ForegroundColor Red
+                
+                $choice = (Read-Host "`nOpción").ToUpper()
+                Write-Host ""
+                switch ($choice) { 
+                    '1' { Set-HighPerformancePowerPlan }
+                    '2' { Disable-Telemetry }
+                    '3' { Optimize-GamingMode }
+                    '4' { Remove-Bloatware }
                 }
-                switch ($choice) { '1' { Set-HighPerformancePowerPlan } '2' { Optimize-Drives } }
                 if ($choice -ne 'B') { Pause-And-Continue }
             } while ($choice -ne 'B')
         }
-        '4' { # Menú de Utilidades
+        '4' {
              do {
-                $choice = Show-Menu -Title "UTILIDADES Y SEGURIDAD" -Content {
-                    Write-Host "[1] Crear Punto de Restauración del Sistema"
-                    Write-Host "[2] Re-registrar Apps de la Tienda de Windows"
-                    Write-Host "[B] Volver" -ForegroundColor Red
-                }
-                switch ($choice) { '1' { Create-SystemRestorePoint } '2' { Reregister-StoreApps } }
-                if ($choice -ne 'B') { Pause-And-Continue }
-            } while ($choice -ne 'B')
-        }
-        '5' { # Menú de Información
-             do {
-                $choice = Show-Menu -Title "INFORMACIÓN DEL SISTEMA" -Content {
-                    Write-Host "[1] Mostrar Información General del PC"
-                    Write-Host "[2] Mostrar Uso de Espacio en Disco"
-                    Write-Host "[3] Mostrar Información de Memoria RAM (Capacidad y Slots)"
-                    Write-Host "[A] MOSTRAR TODO" -ForegroundColor Cyan
-                    Write-Host "[B] Volver" -ForegroundColor Red
-                }
-                switch ($choice) {
-                    '1' { Show-SystemInfo }
-                    '2' { Show-DiskSpace }
-                    '3' { Show-MemoryInfo }
-                    'A' { Show-SystemInfo; Show-DiskSpace; Show-MemoryInfo }
+                Draw-Header "UTILIDADES Y SEGURIDAD"
+                Write-Host "[1] Crear Punto de Restauración"
+                Write-Host "[2] Limpiar Caché DNS y Reiniciar Winsock"
+                Write-Host "[B] Volver" -ForegroundColor Red
+                
+                $choice = (Read-Host "`nOpción").ToUpper()
+                Write-Host ""
+                switch ($choice) { 
+                    '1' { Create-SystemRestorePoint }
+                    '2' { 
+                        ipconfig /flushdns
+                        netsh winsock reset
+                        Write-Host "✔️ Red reiniciada. Se recomienda reiniciar el equipo." -ForegroundColor Green
+                    }
                 }
                 if ($choice -ne 'B') { Pause-And-Continue }
             } while ($choice -ne 'B')
         }
-        '6' { # Menú de Red
-            do {
-                $choice = Show-Menu -Title "UTILIDADES DE RED" -Content {
-                    Write-Host "[1] Limpiar Caché DNS"
-                    Write-Host "[2] Reiniciar Catálogo Winsock (Requiere reinicio del PC)"
-                    Write-Host "[B] Volver" -ForegroundColor Red
-                }
-                switch ($choice) { '1' { Flush-DNS } '2' { Reset-Winsock } }
-                if ($choice -ne 'B') { Pause-And-Continue }
-            } while ($choice -ne 'B')
+        '5' {
+            Draw-Header "INFORMACIÓN DEL SISTEMA"
+            Show-SystemInfo
+            Pause-And-Continue
         }
-        'Q' { Write-Host "Saliendo del programa..." }
-        default {
-            if ($mainChoice) { # Evita mostrar error si el usuario solo presiona Enter
-                Write-Host "`n❌ Opción no válida." -ForegroundColor Red
-                Pause-And-Continue
-            }
+        'Q' { 
+            Write-Host "`nSaliendo del optimizador... ¡Hasta pronto!" -ForegroundColor Cyan 
+            Write-Log "Cierre de la herramienta."
         }
     }
 } while ($mainChoice -ne 'Q')
