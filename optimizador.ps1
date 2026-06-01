@@ -26,7 +26,7 @@ function Check-Administrator {
     Write-Log "Inicio de sesión de optimización (Administrador verificado)."
 }
 
-# --- 2. MOTOR DE INTERFAZ GRÁFICA DE TERMINAL (TUI CENTRADA) ---
+# --- 2. MOTOR DE INTERFAZ GRÁFICA DE TERMINAL (TUI CENTRADA Y CORREGIDA) ---
 function Show-InteractiveMenu {
     param(
         [string]$Title,
@@ -38,28 +38,36 @@ function Show-InteractiveMenu {
     while ($true) {
         Clear-Host
         
-        # Calcular el margen dinámico para centrar todo el bloque
+        # Calcular el margen dinámico
         $consoleWidth = $Host.UI.RawUI.WindowSize.Width
         $blockWidth = 60
         $padLeft = [math]::Max(0, [math]::Floor(($consoleWidth - $blockWidth) / 2))
         $margin = " " * $padLeft
 
-        # Centrar el texto del título dentro del bloque
+        # Centrar el título
         $titlePadLeft = [math]::Max(0, [math]::Floor(($blockWidth - $Title.Length) / 2))
         $titlePadRight = [math]::Max(0, $blockWidth - $Title.Length - $titlePadLeft)
         $centeredTitle = (" " * $titlePadLeft) + $Title + (" " * $titlePadRight)
 
-        # Dibujar el encabezado
+        # Dibujar el encabezado (Margen transparente + Título coloreado)
         Write-Host "$margin============================================================" -ForegroundColor Cyan
-        Write-Host "$margin$centeredTitle" -ForegroundColor White -BackgroundColor DarkCyan
+        Write-Host $margin -NoNewline
+        Write-Host $centeredTitle -ForegroundColor White -BackgroundColor DarkCyan
         Write-Host "$margin============================================================" -ForegroundColor Cyan
         Write-Host ""
 
         # Dibujar las opciones
         for ($i = 0; $i -lt $Options.Count; $i++) {
             if ($i -eq $selected) {
-                Write-Host "$margin  > $($Options[$i]) " -BackgroundColor DarkCyan -ForegroundColor White
+                # Preparar el texto y rellenar con espacios hasta llegar a los 60 caracteres
+                $optText = "  > $($Options[$i])"
+                $optTextPadded = $optText.PadRight($blockWidth, ' ')
+                
+                # Imprimir margen transparente + Opción coloreada en bloque completo
+                Write-Host $margin -NoNewline
+                Write-Host $optTextPadded -BackgroundColor DarkCyan -ForegroundColor White
             } else {
+                # Opción normal
                 Write-Host "$margin    $($Options[$i]) " -ForegroundColor Gray
             }
         }
