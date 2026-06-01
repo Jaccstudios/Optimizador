@@ -1,6 +1,6 @@
 #--------------------------------------------------------------------------------#
 #               HERRAMIENTA AVANZADA DE OPTIMIZACIÓN - INTERACTIVA               #
-#     Ejecución Fileless (En memoria) | Navegación por teclado (TUI)             #
+#     Ejecución Fileless (En memoria) | Navegación por teclado (TUI Centrada)    #
 #--------------------------------------------------------------------------------#
 
 # --- 1. CONFIGURACIÓN PARA EJECUCIÓN EN MEMORIA ---
@@ -20,13 +20,13 @@ function Check-Administrator {
         Write-Host "  ERROR: PERMISOS INSUFICIENTES" -ForegroundColor White -BackgroundColor Red
         Write-Host "============================================================" -ForegroundColor Red
         Write-Host "`nAl usar la ejecución en memoria (irm | iex), tu terminal debe tener privilegios de Administrador." -ForegroundColor Yellow
-        Write-Host "Asegúrate de haber abierto PowerShell como Administrador o de iniciar sesión SSH con una cuenta elevada." -ForegroundColor Yellow
+        Write-Host "Asegúrate de haber iniciado sesión SSH con una cuenta elevada." -ForegroundColor Yellow
         exit
     }
     Write-Log "Inicio de sesión de optimización (Administrador verificado)."
 }
 
-# --- 2. MOTOR DE INTERFAZ GRÁFICA DE TERMINAL (TUI) ---
+# --- 2. MOTOR DE INTERFAZ GRÁFICA DE TERMINAL (TUI CENTRADA) ---
 function Show-InteractiveMenu {
     param(
         [string]$Title,
@@ -37,22 +37,41 @@ function Show-InteractiveMenu {
 
     while ($true) {
         Clear-Host
-        Write-Host "============================================================" -ForegroundColor Cyan
-        Write-Host "  $Title" -ForegroundColor White -BackgroundColor DarkCyan
-        Write-Host "============================================================" -ForegroundColor Cyan
+        
+        # Calcular el margen dinámico para centrar todo el bloque
+        $consoleWidth = $Host.UI.RawUI.WindowSize.Width
+        $blockWidth = 60
+        $padLeft = [math]::Max(0, [math]::Floor(($consoleWidth - $blockWidth) / 2))
+        $margin = " " * $padLeft
+
+        # Centrar el texto del título dentro del bloque
+        $titlePadLeft = [math]::Max(0, [math]::Floor(($blockWidth - $Title.Length) / 2))
+        $titlePadRight = [math]::Max(0, $blockWidth - $Title.Length - $titlePadLeft)
+        $centeredTitle = (" " * $titlePadLeft) + $Title + (" " * $titlePadRight)
+
+        # Dibujar el encabezado
+        Write-Host "$margin============================================================" -ForegroundColor Cyan
+        Write-Host "$margin$centeredTitle" -ForegroundColor White -BackgroundColor DarkCyan
+        Write-Host "$margin============================================================" -ForegroundColor Cyan
         Write-Host ""
 
+        # Dibujar las opciones
         for ($i = 0; $i -lt $Options.Count; $i++) {
             if ($i -eq $selected) {
-                Write-Host "  > $($Options[$i]) " -BackgroundColor DarkCyan -ForegroundColor White
+                Write-Host "$margin  > $($Options[$i]) " -BackgroundColor DarkCyan -ForegroundColor White
             } else {
-                Write-Host "    $($Options[$i]) " -ForegroundColor Gray
+                Write-Host "$margin    $($Options[$i]) " -ForegroundColor Gray
             }
         }
         
-        Write-Host "`n------------------------------------------------------------" -ForegroundColor DarkCyan
-        Write-Host " Usa las flechas [Arriba/Abajo] y presiona [Enter]" -ForegroundColor DarkGray
+        Write-Host "`n$margin------------------------------------------------------------" -ForegroundColor DarkCyan
+        
+        # Centrar el pie de página
+        $footer = "Usa las flechas [Arriba/Abajo] y presiona [Enter]"
+        $footerPad = (" " * [math]::Max(0, [math]::Floor(($blockWidth - $footer.Length) / 2)))
+        Write-Host "$margin$footerPad$footer" -ForegroundColor DarkGray
 
+        # Capturar teclado
         $key = [Console]::ReadKey($true).Key
 
         if ($key -eq 'UpArrow') { $selected = [Math]::Max(0, $selected - 1) }
